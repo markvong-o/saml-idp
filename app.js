@@ -21,7 +21,10 @@ const chalk               = require('chalk'),
       Parser              = require('xmldom').DOMParser,
       SessionParticipants = require('samlp/lib/sessionParticipants'),
       SimpleProfileMapper = require('./lib/simpleProfileMapper.js'),
-      axios               = require('axios').default;
+      axios               = require('axios').default,
+      {expressjwt: jwt}   = require('express-jwt'),
+      jwks                = require('jwks-rsa'),
+      jwt_decode          = require('jwt-decode');
 
 /**
  * Globals
@@ -703,8 +706,22 @@ function _runServer(argv) {
   /*
     Custom token exchange route replicated from sign in
   */
+    var jwtCheck = jwt({
+        secret: jwks.expressJwtSecret({
+            cache: true,
+            rateLimit: true,
+            jwksRequestsPerMinute: 5,
+            jwksUri: 'https://dev-b4nlzp3r.us.auth0.com/.well-known/jwks.json'
+      }),
+      audience: 'api://dev-saml',
+      issuer: 'https://dev-b4nlzp3r.us.auth0.com/',
+      algorithms: ['RS256']
+  });
 
-  app.post("/exchange", function(req, res) {
+  app.post("/exchange", jwtCheck, function(req, res) {
+    const accessToken = req.headers.authorization.split(" ")[1];
+    console.log(accessToken);
+    console.log(jwt_decode(accessToken));
     const authOptions = extend({}, req.idp.options);
     Object.keys(req.body).forEach(function(key) {
       var buffer;
