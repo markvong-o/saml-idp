@@ -20,7 +20,8 @@ const chalk               = require('chalk'),
       samlp               = require('samlp'),
       Parser              = require('xmldom').DOMParser,
       SessionParticipants = require('samlp/lib/sessionParticipants'),
-      SimpleProfileMapper = require('./lib/simpleProfileMapper.js');
+      SimpleProfileMapper = require('./lib/simpleProfileMapper.js'),
+      axios               = require('axios').default;
 
 /**
  * Globals
@@ -457,13 +458,17 @@ function _runServer(argv) {
                                   {bold SAMLResponse} =>`
                               ));
 
-                              console.log(prettyPrintXml(response.toString(), 4));
-
-                              res.render('samlresponse', {
-                                AcsUrl: opts.postUrl,
-                                SAMLResponse: response.toString('base64'),
-                                RelayState: opts.RelayState
+                              console.log(response.toString('base64'));
+                              axios.post("https://okta-custom-api.glitch.me/saml", {
+                                "SAMLResponse": response.toString('base64')
                               });
+                              // console.log(prettyPrintXml(response.toString(), 4));
+
+                              // res.render('samlresponse', {
+                              //   AcsUrl: opts.postUrl,
+                              //   SAMLResponse: response.toString('base64'),
+                              //   RelayState: opts.RelayState
+                              // });
                             }
   }
 
@@ -474,6 +479,9 @@ function _runServer(argv) {
   app.set('host', process.env.HOST || argv.host);
   app.set('port', process.env.PORT || argv.port);
   app.set('views', path.join(__dirname, 'views'));
+
+  // parse application/json
+  app.use(bodyParser.json());
 
   /**
    * View Engine
@@ -689,6 +697,56 @@ function _runServer(argv) {
           ${key}: {cyan ${formatOptionValue(key, value)}}`
         ).join('')}
     `));
+    // samlp.auth(authOptions)(req, res);
+  })
+
+  /*
+    Custom token exchange route replicated from sign in
+  */
+
+  app.post("/exchange", function(req, res) {
+    const authOptions = extend({}, req.idp.options);
+    Object.keys(req.body).forEach(function(key) {
+      var buffer;
+      if (key === '_authnRequest') {
+        buffer = new Buffer(req.body[key], 'base64');
+        req.authnRequest = JSON.parse(buffer.toString('utf8'));
+
+        // Apply AuthnRequest Params
+        authOptions.inResponseTo = req.authnRequest.id;
+        if (req.idp.options.allowRequestAcsUrl && req.authnRequest.acsUrl) {
+          authOptions.acsUrl = req.authnRequest.acsUrl;
+          authOptions.recipient = req.authnRequest.acsUrl;
+          authOptions.destination = req.authnRequest.acsUrl;
+          authOptions.forceAuthn = req.authnRequest.forceAuthn;
+        }
+        if (req.authnRequest.relayState) {
+          authOptions.RelayState = req.authnRequest.relayState;
+        }
+      } else {
+        req.user[key] = req.body[key];
+      }
+    });
+
+    if (!authOptions.encryptAssertion) {
+      delete authOptions.encryptionCert;
+      delete authOptions.encryptionPublicKey;
+    }
+
+    // Set Session Index
+    authOptions.sessionIndex = getSessionIndex(req);
+
+    // Keep calm and Single Sign On
+    console.log(dedent(chalk`
+      Generating SAML Response using =>
+        {bold User} => ${Object.entries(req.user).map(([key, value]) => chalk`
+          ${key}: {cyan ${value}}`
+        ).join('')}
+        {bold SAMLP Options} => ${Object.entries(authOptions).map(([key, value]) => chalk`
+          ${key}: {cyan ${formatOptionValue(key, value)}}`
+        ).join('')}
+    `));
+
     samlp.auth(authOptions)(req, res);
   })
 
